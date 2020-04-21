@@ -11,12 +11,14 @@ public class Aggregation {
     static private long getCalls;
     @Expose
     static private long scanCalls;
+    @Expose
+    static private long cacheMissed;
 
     public static long getBatchCalls() {
         return batchCalls;
     }
 
-    public static void increBatchCalls() {
+    synchronized public static void increBatchCalls() {
         batchCalls++;
     }
 
@@ -25,7 +27,7 @@ public class Aggregation {
         return putCalls;
     }
 
-    public static void increPutCalls() {
+    synchronized public static void increPutCalls() {
         putCalls++;
     }
 
@@ -33,7 +35,7 @@ public class Aggregation {
         return getCalls;
     }
 
-    public static void increGetCalls(){
+    synchronized public static void increGetCalls(){
         getCalls++;
     }
 
@@ -41,7 +43,15 @@ public class Aggregation {
         return scanCalls;
     }
 
-    public static void increScanCalls() {
+    synchronized public static void increScanCalls() {
         scanCalls++;
+    }
+
+    public static long getCacheMissed() {
+        return cacheMissed;
+    }
+
+    synchronized public static void increCacheMissed(){
+        cacheMissed++;
     }
 }

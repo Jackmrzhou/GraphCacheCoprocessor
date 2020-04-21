@@ -4,10 +4,11 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.protobuf.ByteString;
 import io.grpc.Channel;
 import org.apache.hadoop.hbase.Cell;
+import org.gilmour.coprocessor.CacheService.generated.CacheServer;
+import org.gilmour.coprocessor.CacheService.generated.CacheServiceGrpc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.ByteBuffer;
 import java.util.List;
 
 public class CacheServiceClient {

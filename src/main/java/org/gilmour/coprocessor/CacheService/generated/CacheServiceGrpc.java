@@ -1,4 +1,4 @@
-package org.gilmour.coprocessor.CacheService;
+package org.gilmour.coprocessor.CacheService.generated;
 
 import static io.grpc.MethodDescriptor.generateFullMethodName;
 import static io.grpc.stub.ClientCalls.asyncUnaryCall;

@@ -1,10 +1,13 @@
 package org.gilmour.coprocessor;
 
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
-import org.gilmour.coprocessor.CacheService.CacheServer;
+import org.checkerframework.checker.nullness.compatqual.NullableDecl;
+import org.gilmour.coprocessor.CacheService.generated.CacheServer;
 import org.gilmour.coprocessor.CacheService.CacheServiceClient;
 import org.gilmour.coprocessor.CacheService.ClientCreator;
 import org.gilmour.coprocessor.CacheService.HttpResolver;
@@ -26,10 +29,10 @@ public class testMain {
         ListenableFuture<CacheServer.SetValuesResponse> af = client.SetValues(Hbasecells);
         CacheServer.SetValuesResponse r = af.get();
         System.out.println(r.getCode());
-        ListenableFuture future = client.GetRow("666".getBytes());
+        ListenableFuture<CacheServer.GetRowResponse> future = client.GetRow("666".getBytes());
         future.addListener(()->{
             try {
-                CacheServer.GetRowResponse res = (CacheServer.GetRowResponse) future.get();
+                CacheServer.GetRowResponse res =  future.get();
                 System.out.println(res.getCode());
                 System.out.println(res.getMessage());
                 List<CacheServer.HCell> cells = res.getResultList();
@@ -41,6 +44,17 @@ public class testMain {
                 });
             }catch (ExecutionException | InterruptedException e) {
                 e.printStackTrace();
+            }
+        }, MoreExecutors.directExecutor());
+        Futures.addCallback(future, new FutureCallback<CacheServer.GetRowResponse>() {
+            @Override
+            public void onSuccess(@NullableDecl CacheServer.GetRowResponse response) {
+
+            }
+
+            @Override
+            public void onFailure(Throwable throwable) {
+
             }
         }, MoreExecutors.directExecutor());
         future.get();

@@ -34,6 +34,7 @@
           <groupId>org.apache.hbase</groupId>
           <artifactId>hbase-client</artifactId>
           <version>2.2.4</version>
+        <scope>provided</scope>
         <exclusions>
           <exclusion>
             <groupId>log4j</groupId>
@@ -53,6 +54,7 @@
           <groupId>org.apache.hbase</groupId>
           <artifactId>hbase-server</artifactId>
           <version>2.2.4</version>
+        <scope>provided</scope>
         <exclusions>
           <exclusion>
             <groupId>log4j</groupId>
@@ -72,16 +74,19 @@
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-slf4j-impl</artifactId>
       <version>2.9.0</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-api</artifactId>
       <version>2.13.1</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-core</artifactId>
       <version>2.13.1</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>io.grpc</groupId>
@@ -158,6 +163,16 @@
     </extensions>
     <plugins>
       <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.8.0</version>
+        <configuration combine.self="override">
+          <excludes>
+            <exclude>**/generated-sources/*</exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+      <plugin>
         <groupId>org.xolstice.maven.plugins</groupId>
         <artifactId>protobuf-maven-plugin</artifactId>
         <version>0.6.1</version>
@@ -166,11 +181,19 @@
           <pluginId>grpc-java</pluginId>
           <pluginArtifact>io.grpc:protoc-gen-grpc-java:1.28.1:exe:${os.detected.classifier}</pluginArtifact>
         </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.1.1</version>
+        <configuration>
+          <!-- put your configurations here -->
+        </configuration>
         <executions>
           <execution>
+            <phase>package</phase>
             <goals>
-              <goal>compile</goal>
-              <goal>compile-custom</goal>
+              <goal>shade</goal>
             </goals>
           </execution>
         </executions>
