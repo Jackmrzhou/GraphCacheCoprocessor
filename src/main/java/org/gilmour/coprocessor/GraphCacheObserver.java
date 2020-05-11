@@ -8,8 +8,13 @@ import org.apache.hadoop.hbase.coprocessor.ObserverContext;
 import org.apache.hadoop.hbase.coprocessor.RegionCoprocessor;
 import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
 import org.apache.hadoop.hbase.coprocessor.RegionObserver;
+import org.apache.hadoop.hbase.filter.Filter;
+import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.MiniBatchOperationInProgress;
+import org.apache.hadoop.hbase.regionserver.RegionScanner;
+import org.apache.hadoop.hbase.regionserver.querymatcher.ScanQueryMatcher;
+import org.apache.hadoop.hbase.regionserver.querymatcher.UserScanQueryMatcher;
 import org.apache.hadoop.hbase.wal.WALEdit;
 import org.gilmour.coprocessor.CacheService.generated.CacheServer;
 import org.gilmour.coprocessor.CacheService.CacheServiceClient;
@@ -33,9 +38,10 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
 
     private List<WrapFuture> futures = Collections.synchronizedList(new LinkedList<>());
     private AtomicBoolean cleaning = new AtomicBoolean(false);
-    private final int cleaningThreshold = 100;
+    private final int cleaningThreshold = 1000;
 
     // used for strong consistency
+    // todo: change to invalid cache rather than make a local map
     private ConcurrentMap<byte[], Boolean> staleRowKeys;
     private ConcurrentMap<byte[], Boolean> pendingKeys;
 
@@ -70,6 +76,7 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
         logger.info("postBatchMutate");
         for (int i = 0; i < miniBatchOp.size(); i++) {
             Mutation mutation = miniBatchOp.getOperation(i);
+            logger.info(mutation.toJSON());
             NavigableMap<byte[], List<Cell>> map = mutation.getFamilyCellMap();
             List<Cell> cells = new LinkedList<>();
             for (List<Cell> v : map.values()) {
@@ -99,7 +106,7 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
         cacheCells(cells);
     }
 
-    // warning: all cells must belong to the sane row
+    // warning: all cells must belong to the same row
     private void cacheCells(List<Cell> cells){
         if (cells.size() == 0)
             return;
@@ -142,24 +149,32 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
     public void preGetOp(ObserverContext<RegionCoprocessorEnvironment> c, Get get, List<Cell> result) throws IOException {
         Aggregation.increGetCalls();
         logger.info("getOp");
+        logger.info(get.toJSON());
         // check whether the cached row is stale or the writing process is undone
-        if (staleRowKeys.get(get.getRow()) == null && pendingKeys.get(get.getRow()) == null)
+        if (staleRowKeys.get(get.getRow()) != null || pendingKeys.get(get.getRow()) != null)
             return;
-
         ListenableFuture<CacheServer.GetRowResponse> future = client.GetRow(get.getRow());
         try {
             CacheServer.GetRowResponse response = future.get();
             if (response.getCode() == 1) {
                 logger.info("cache missed");
-                // cache missed
-                // todo: add metrics here
                 Aggregation.increCacheMissed();
+                // cache missed
+                Get basicGet = new Get(get.getRow());
+                List<Cell> res = c.getEnvironment().getRegion().get(basicGet, false);
+                if (res.size() == 0) {
+                    logger.error("get row with empty result!");c.bypass();
+                    return;
+                }
+                cacheCells(res);
+                doFilter(get, res, result);
+                c.bypass();
             }
             else if (response.getCode() == 0) {
                 List<CacheServer.HCell> cells = response.getResultList();
-                if (result == null)
-                    result = new LinkedList<>();
-                cellConverter(cells, result);
+                List<Cell> res = new LinkedList<>();
+                cellConverter(cells, res);
+                doFilter(get, res, result);
                 // result is loaded from cache, stop loading from hbase
                 c.bypass();
             }
@@ -168,12 +183,64 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
             logger.info("get row from cache exception");
             logger.info(e.getMessage());
         }
+        /*logger.info("cells filter manually");
+        for (Cell cell : result) {
+            logger.info(cell.toString());
+        }
+        result.clear();
+        if (get.getFilter() != null)
+            get.getFilter().reset();*/
+    }
+
+    private void doFilter(Get get, List<Cell> in, List<Cell> out) throws IOException{
+        if (in.size() == 0)
+            return;
+
+        Filter filter = get.getFilter();
+        if (filter != null && filter.filterRowKey(in.get(0))){
+            // this row is not included
+            return;
+        }
+        Map<byte[], NavigableSet<byte[]>> map = get.getFamilyMap();
+        boolean check = !map.isEmpty();
+        for (Cell cc : in) {
+            Filter.ReturnCode code = Filter.ReturnCode.SKIP;
+            if (filter != null) {
+                code = filter.filterCell(cc);
+            }
+            if (filter == null || code == Filter.ReturnCode.INCLUDE || code == Filter.ReturnCode.INCLUDE_AND_NEXT_COL || code == Filter.ReturnCode.INCLUDE_AND_SEEK_NEXT_ROW) {
+                if (filter != null) {
+                    filter.transformCell(cc);
+                }
+                if (check) {
+                    byte[] cf = CellUtil.cloneFamily(cc);
+                    NavigableSet<byte[]> set = map.get(cf);
+                    if (map.containsKey(cf)
+                            && (set == null || set.contains(CellUtil.cloneQualifier(cc)))
+                            && get.getTimeRange().withinTimeRange(cc.getTimestamp())) {
+                        out.add(cc);
+                    }
+                } else {
+                    out.add(cc);
+                }
+            }
+        }
+        if (filter != null) {
+            filter.filterRowCells(out);
+        }
+        if (filter != null && filter.filterRow()) {
+            out.clear();
+        }
     }
 
     @Override
     public void postGetOp(ObserverContext<RegionCoprocessorEnvironment> c, Get get, List<Cell> result) throws IOException {
-        logger.info("postGetOp, staring caching...");
-        cacheCells(result);
+        logger.info("postGetOp");
+        //cacheCells(result);
+        /*logger.info("cells filtered by the hbase");
+        for (Cell cell : result) {
+            logger.info(cell.toString());
+        }*/
     }
 
     @Override
@@ -185,6 +252,7 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
 
 
     private void triggerClean(){
+        logger.info("start to clean finished futures");
         if (cleaning.get()) {
             return;
         }
