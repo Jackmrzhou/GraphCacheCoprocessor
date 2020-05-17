@@ -6,17 +6,12 @@ import io.grpc.Channel;
 import org.apache.hadoop.hbase.Cell;
 import org.gilmour.coprocessor.CacheService.generated.CacheServer;
 import org.gilmour.coprocessor.CacheService.generated.CacheServiceGrpc;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 public class CacheServiceClient {
-    private final static Logger logger = LoggerFactory.getLogger(CacheServiceClient.class);
-    private final CacheServiceGrpc.CacheServiceBlockingStub blockingStub;
     private final CacheServiceGrpc.CacheServiceFutureStub futureStub;
     public CacheServiceClient(Channel channel) {
-        blockingStub = CacheServiceGrpc.newBlockingStub(channel);
         futureStub = CacheServiceGrpc.newFutureStub(channel);
     }
 

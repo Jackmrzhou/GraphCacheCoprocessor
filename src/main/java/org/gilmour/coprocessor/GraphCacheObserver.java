@@ -9,12 +9,8 @@ import org.apache.hadoop.hbase.coprocessor.RegionCoprocessor;
 import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
 import org.apache.hadoop.hbase.coprocessor.RegionObserver;
 import org.apache.hadoop.hbase.filter.Filter;
-import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.MiniBatchOperationInProgress;
-import org.apache.hadoop.hbase.regionserver.RegionScanner;
-import org.apache.hadoop.hbase.regionserver.querymatcher.ScanQueryMatcher;
-import org.apache.hadoop.hbase.regionserver.querymatcher.UserScanQueryMatcher;
 import org.apache.hadoop.hbase.wal.WALEdit;
 import org.gilmour.coprocessor.CacheService.generated.CacheServer;
 import org.gilmour.coprocessor.CacheService.CacheServiceClient;
@@ -24,7 +20,7 @@ import org.gilmour.coprocessor.logs.Logger;
 import org.gilmour.coprocessor.statistic.Aggregation;
 import org.gilmour.coprocessor.utils.Utils;
 import org.gilmour.coprocessor.utils.WrapFuture;
-import org.gilmour.coprocessor.web.WebConsole;
+import org.gilmour.coprocessor.web.WebAPI;
 
 import java.io.IOException;
 import java.util.*;
@@ -38,7 +34,7 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
 
     private List<WrapFuture> futures = Collections.synchronizedList(new LinkedList<>());
     private AtomicBoolean cleaning = new AtomicBoolean(false);
-    private final int cleaningThreshold = 1000;
+    private final int cleaningThreshold = 2000;
 
     // used for strong consistency
     // todo: change to invalid cache rather than make a local map
@@ -48,7 +44,7 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
     @Override
     public void start(CoprocessorEnvironment env) throws IOException {
         executorService = Executors.newFixedThreadPool(4);
-        executorService.execute(new WebConsole());
+        executorService.execute(new WebAPI());
         client = new ClientCreator().CreateClient(new HttpResolver());
         staleRowKeys = new ConcurrentHashMap<>();
         pendingKeys = new ConcurrentHashMap<>();
@@ -76,6 +72,10 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
         logger.info("postBatchMutate");
         for (int i = 0; i < miniBatchOp.size(); i++) {
             Mutation mutation = miniBatchOp.getOperation(i);
+            if (staleRowKeys.get(mutation.getRow()) != null) {
+                // don't update stale row
+                continue;
+            }
             logger.info(mutation.toJSON());
             NavigableMap<byte[], List<Cell>> map = mutation.getFamilyCellMap();
             List<Cell> cells = new LinkedList<>();
@@ -123,14 +123,17 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
                     logger.error("set cache failed, row:"
                             + new String(CellUtil.cloneRow(cells.get(0)))
                             + "; message:" + response.getMessage());
+                    Aggregation.increCacheFailures();
+                } else {
+                    logger.info("set cache succeeded, cells:" + cells.size());
+                    // remove the key from the pending keys
+                    pendingKeys.remove(CellUtil.cloneRow(cells.get(0)));
                 }
-                logger.info("set cache succeeded, cells:" + cells.size());
-                // remove the key from the pending keys
-                pendingKeys.remove(CellUtil.cloneRow(cells.get(0)));
             } catch (ExecutionException | InterruptedException e) {
                 Status status = Status.fromThrowable(e);
                 e.printStackTrace();
                 staleRowKeys.put(CellUtil.cloneRow(cells.get(0)), true);
+                Aggregation.increCacheFailures();
                 if (!status.equals(Status.UNKNOWN))
                     logger.error("set cache failed, rpc error. error code:");
                 else
@@ -241,6 +244,28 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
         for (Cell cell : result) {
             logger.info(cell.toString());
         }*/
+        if (staleRowKeys.get(get.getRow()) != null) {
+            // try to update stale keys
+            ListenableFuture<CacheServer.GetRowResponse> future = client.GetRow(get.getRow());
+            future.addListener(()->{
+                try {
+                    CacheServer.GetRowResponse response = future.get();
+                    if (response.getCode() == 1) {
+                        // stale keys are removed
+                        // set cache
+                        cacheCells(result);
+                        staleRowKeys.remove(get.getRow());
+                    }
+                    else if (response.getCode() == 0) {
+                        // stale keys are still in the cache, ignoring
+                    }
+                } catch (ExecutionException | InterruptedException e) {
+                    e.printStackTrace();
+                    logger.info("get row from cache exception");
+                    logger.info(e.getMessage());
+                }
+            }, executorService);
+        }
     }
 
     @Override
@@ -267,6 +292,7 @@ public class GraphCacheObserver implements RegionObserver, RegionCoprocessor {
         futures.removeIf(WrapFuture::destroyable);
 
         cleaning.set(false);
+        Aggregation.setFuturesSize(futures.size());
     }
 
     private void cellConverter(List<CacheServer.HCell> cells, List<Cell> cellsOut){

@@ -8,8 +8,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 
 
-public class WebConsole implements Runnable{
-    private static Logger logger = LoggerFactory.getLogger(WebConsole.class);
+public class WebAPI implements Runnable{
+    private static Logger logger = LoggerFactory.getLogger(WebAPI.class);
     @Override
     public void run() {
         try {

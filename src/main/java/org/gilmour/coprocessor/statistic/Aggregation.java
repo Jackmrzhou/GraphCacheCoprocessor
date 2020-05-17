@@ -13,6 +13,10 @@ public class Aggregation {
     static private long scanCalls;
     @Expose
     static private long cacheMissed;
+    @Expose
+    static private long cacheFailures;
+    @Expose
+    static private long futuresSize;
 
     public static long getBatchCalls() {
         return batchCalls;
@@ -53,5 +57,21 @@ public class Aggregation {
 
     synchronized public static void increCacheMissed(){
         cacheMissed++;
+    }
+
+    public static long getCacheFailures() {
+        return cacheFailures;
+    }
+
+    synchronized public static void increCacheFailures() {
+        cacheFailures++;
+    }
+
+    public static long getFuturesSize() {
+        return futuresSize;
+    }
+
+    synchronized public static void setFuturesSize(long futuresSize) {
+        Aggregation.futuresSize = futuresSize;
     }
 }
